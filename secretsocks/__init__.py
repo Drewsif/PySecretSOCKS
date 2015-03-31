@@ -1,2 +1,2 @@
-from secretsocks import *
-from server import *
+from .secretsocks import *
+from .server import *

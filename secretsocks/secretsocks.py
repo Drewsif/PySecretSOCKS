@@ -3,17 +3,16 @@ import asyncore
 import socket
 import struct
 import threading
+import sys
 from collections import deque
-try:
-    import Queue
-except:
-    import queue as Queue
-try:
-    range = xrange
-except:
-    pass
 DEBUG = False
-
+PY3	= False
+if sys.version_info[0] == 3:
+    import queue as Queue
+    PY3 = True
+else:
+    import Queue
+    range = xrange
 
 class Client():
     CONNECT = 1
@@ -50,7 +49,11 @@ class Client():
             print('New conn:', id)
         s.settimeout(10)
         self._conns[id] = s
-        msg = struct.pack('<HBH'+str(len(addr))+'sB', id, cmd, port, str(addr), 0x00)
+        if PY3:
+            addr = bytes(addr, 'utf8')
+        else:
+            addr = str(addr)
+        msg = struct.pack('<HBH'+str(len(addr))+'sB', id, cmd, port, addr, 0x00)
         self.writebuf.put(msg)
         t = threading.Thread(target=self._recv_loop, args=(id,))
         t.daemon = True

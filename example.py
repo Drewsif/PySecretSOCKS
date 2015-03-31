@@ -2,8 +2,15 @@
 from __future__ import division, absolute_import, print_function, unicode_literals
 import secretsocks
 import socket
-import Queue
 import threading
+import sys
+PY3	= False
+if sys.version_info[0] == 3:
+    import queue as Queue
+    PY3 = True
+else:
+    import Queue
+    range = xrange
 
 class Client(secretsocks.Client):
     def __init__(self, ip, port):

@@ -2,16 +2,15 @@ from __future__ import division, absolute_import, print_function, unicode_litera
 import threading
 import struct
 import socket
+import sys
 DEBUG = False
-try:
-    import Queue
-except:
+PY3 = False
+if sys.version_info[0] == 3:
     import queue as Queue
-try:
+    PY3 = True
+else:
+    import Queue
     range = xrange
-except:
-    pass
-
 
 class Server():
     def __init__(self):
@@ -55,11 +54,12 @@ class Server():
                     port, = struct.unpack('<H', data[3:5])
                     addr = ""
                     i = 5
-                    c, = struct.unpack('<c', data[i])
-                    while c != '\x00':
+                    c, = struct.unpack('<c', data[i:i+1])
+                    while c != b'\x00':
+                        c = c.decode('utf8')
                         addr += c
                         i += 1
-                        c, = struct.unpack('<c', data[i])
+                        c, = struct.unpack('<c', data[i:i+1])
                     # Open Socket
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     try:
