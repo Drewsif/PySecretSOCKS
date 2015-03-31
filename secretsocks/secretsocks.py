@@ -1,146 +1,122 @@
-#!/usr/bin/env python
 from __future__ import division, absolute_import, print_function, unicode_literals
 import asyncore
 import socket
 import struct
-import Queue
 import threading
-
-global DEBUG
+from collections import deque
+try:
+    import Queue
+except:
+    import queue as Queue
+try:
+    range = xrange
+except:
+    pass
 DEBUG = False
 
 
-class RemoteConnection():
+class Client():
     CONNECT = 1
     BIND = 2
     UDP_ASSOCIATE = 3
 
     def __init__(self):
-        pass
+        self.recvbuf = Queue.Queue()
+        self.writebuf = Queue.Queue()
+        self._conns = [deque(range(1,255))]
+        self._conns.extend([None]*254)
 
-    def new_conn(self, cmd, addr, port, io):
-        t = threading.Thread(target=self.handle_con, args=(cmd, addr, port, io))
+    def recv(self):
+        raise NotImplementedError
+
+    def write(self):
+        raise NotImplementedError
+
+    def start(self):
+        t = threading.Thread(target=self.write)
         t.daemon = True
         t.start()
-        return True
+        t = threading.Thread(target=self._dataparse)
+        t.daemon = True
+        t.start()
+        t = threading.Thread(target=self.recv)
+        t.daemon = True
+        t.start()
+        return t
 
-    def handle_con(self, cmd, addr, port, io):
-        if cmd != self.CONNECT:
-            io.close()
-            return
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            s.connect((addr, port))
-        except:
-            io.close()
+    def new_conn(self, cmd, addr, port, s):
+        id = self._conns[0].pop()
         if DEBUG:
-            print('Connection open', addr, port)
+            print('New conn:', id)
         s.settimeout(10)
-        t1 = threading.Thread(target=self.read, args=(s, io))
-        t1.daemon = True
-        t1.start()
-        t2 = threading.Thread(target=self.write, args=(s, io))
-        t2.daemon = True
-        t2.start()
-        io.ready()
-        t1.join()
-        t2.join()
-        self.cleanup(s, io)
+        self._conns[id] = s
+        msg = struct.pack('<HBH'+str(len(addr))+'sB', id, cmd, port, str(addr), 0x00)
+        self.writebuf.put(msg)
+        t = threading.Thread(target=self._recv_loop, args=(id,))
+        t.daemon = True
+        t.start()
 
-    def read(self, s, io):
-        while not io.closed:
+    def _recv_loop(self, id):
+        while self._conns[id] is not None:
             try:
-                data = s.recv(4096)
-                if data != b'':
-                    io.write(data)
+                data = self._conns[id].recv(4092)
+                if data == b'':
+                    raise socket.error
                 else:
-                    io.close()
+                    self.writebuf.put(struct.pack('<H', id) + data)
             except socket.timeout:
                 pass
             except socket.error:
-                io.close()
+                self._close_id(id)
 
-    def write(self, s, io):
-        while not io.closed:
-            try:
-                data = io.read()
-                if data is not None:
-                    s.sendall(data)
-            except Queue.Empty:
-                pass
-            except socket.error:
-                io.close()
+    def _close_id(self, id):
+        if self._conns[id] is not None:
+            self._conns[id].close()
+            self._conns[id] = None
+        resp = struct.pack('<HH', 0x00, id)
+        self.writebuf.put(resp)
+        self._conns[0].appendleft(id)
 
-    def cleanup(self, s, io):
-        s.close()
-        io.close()
+    def _dataparse(self):
+        while True:
+            data = self.recvbuf.get()
+            id, = struct.unpack('<H', data[:2])
+            # ID 0 is to close a con
+            if id == 0:
+                id, = struct.unpack('<H', data[2:4])
+                if self._id_check(id):
+                    self._close_id(id)
+            # If we dont have that conn ID, tell the server its closed
+            elif not self._id_check(id):
+                resp = struct.pack('<HH', 0x00, id)
+                self.writebuf.put(resp)
+            # Else write the data
+            else:
+                try:
+                    self._conns[id].sendall(data[2:])
+                except:
+                    self._close_id(id)
 
+    def _id_check(self, id):
+        # TODO: Make this better
+        try:
+            return self._conns[id] is not None
+        except:
+            print('Invalid ID:', id)
+            return False
 
-class IO():
-    def __init__(self):
-        self.readq = Queue.Queue()
-        self.writeq = Queue.Queue()
-        self.closed = False
-        self.remoteopen = threading.Event()
-
-    def ready(self):
-        self.remoteopen.set()
-
-    def ready_wait(self):
-        self.remoteopen.wait()
-
-    def write(self, data):
-        return self.readq.put(data)
-
-    def read(self):
-        return self.writeq.get(True, 1)
-
-    def srvread(self):
-        return self.readq.get(True, 1)
-
-    def srvwrite(self, data):
-        if self.closed:
-            return None
-        return self.writeq.put(data)
-
-    def close(self):
-        self.closed = True
-        self.remoteopen.set()
-        self.readq.put(None)
-        self.writeq.put(None)
-
-
-class SocksHandler(asyncore.dispatcher_with_send):
-    def __init__(self, sock=None, addr=None, remote=None, map=None):
-        asyncore.dispatcher_with_send.__init__(self, sock=sock, map=map)
+# TODO: This does not need to be an asyncore class
+class SocksHandler():
+    def __init__(self, sock, addr, client):
+        self.conn = sock
+        self.conn.setblocking(True)
         self.addr = addr
-        self.remote = remote
+        self.client = client
         self.socks_init()
-        t = threading.Thread(target=self.io_loop)
-        t.daemon = True
-        t.start()
-
-    def io_loop(self):
-        while not self.io.closed:
-            try:
-                data = self.io.srvread()
-                if data != '':
-                    self.send(data)
-                else:
-                    print('close')
-                    self.io.close()
-                    self.close()
-            except Queue.Empty:
-                pass
-            except socket.error:
-                self.io.close()
-                self.close()
-
 
     def socks_init(self):
-        self.socket.setblocking(True)
         # Client sends version and methods
-        self.ver, = struct.unpack('!B', self.recv(1))
+        self.ver, = struct.unpack('!B', self.conn.recv(1))
         if DEBUG:
             print('Version:', self.ver)
         if self.ver == 4:
@@ -149,37 +125,32 @@ class SocksHandler(asyncore.dispatcher_with_send):
             ret = self._socks5_init()
         else:
             print('ERROR: Invalid socks version')
-            self.close()
+            self.conn.close()
         if not ret:
             return None
-        self.socket.setblocking(False)
 
     def _socks4_init(self):
-        cd, dstport, a, b, c ,d = struct.unpack('!BHBBBB', self.recv(7))
+        cd, dstport, a, b, c ,d = struct.unpack('!BHBBBB', self.conn.recv(7))
         userid = ''
-        data = struct.unpack('!B', self.recv(1))
+        data = struct.unpack('!B', self.conn.recv(1))
         while data[0] != 0:
             userid += chr(data[0])
-            data = struct.unpack('!B', self.recv(1))
+            data = struct.unpack('!B', self.conn.recv(1))
 
         dstaddr = ''
         # sock4a
         if a + b + c == 0 and d > 0:
-            data = struct.unpack('!B', self.recv(1))
+            data = struct.unpack('!B', self.conn.recv(1))
             while data[0] != 0:
                 dstaddr += chr(data[0])
-                data = struct.unpack('!B', self.recv(1))
+                data = struct.unpack('!B', self.conn.recv(1))
         # normal socks4
         else:
             dstaddr = "{}.{}.{}.{}".format(a, b, c, d)
 
-        self.io = IO()
-        ret = self.remote.new_conn(cd, dstaddr, dstport, self.io)
-        self.io.ready_wait()
-        if self.io.closed:
-            self.send(struct.pack('!BBHI', 0x00, 0x5B, 0x0000, 0x00000000))
-            return False
-        self.send(struct.pack('!BBHI', 0x00, 0x5A, 0x0000, 0x00000000))
+
+        ret = self.client.new_conn(cd, dstaddr, dstport, self.conn)
+        self.conn.sendall(struct.pack('!BBHI', 0x00, 0x5A, 0x0000, 0x00000000))
         return True
 
     def _socks5_init(self):
@@ -213,25 +184,23 @@ class SocksHandler(asyncore.dispatcher_with_send):
         # , dstport = 0
 
     def handle_read(self):
-        self.io.srvwrite(self.recv(4098))
+        pass
 
 
 class SocksServer(asyncore.dispatcher):
     host = '127.0.0.1'
     port = 1080
     handler = SocksHandler
-    remote = RemoteConnection()
 
-    def __init__(self, host=None, port=None, remote=None, handler=None):
+    def __init__(self, client, host=None, port=None, handler=None):
         asyncore.dispatcher.__init__(self)
         if host is not None:
             self.host = host
         if port is not None:
             self.port = port
-        if remote is not None:
-            self.remote = remote
         if handler is not None:
             self.handler = handler
+        self.client = client
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.set_reuse_addr()
         self.bind((self.host, self.port))
@@ -241,10 +210,7 @@ class SocksServer(asyncore.dispatcher):
         pair = self.accept()
         if pair is not None:
             sock, addr = pair
-            handle = self.handler(sock, addr, self.remote)
+            handle = self.handler(sock, addr, self.client)
 
-if __name__ == '__main__':
-    DEBUG = True
-    print('Starting server...')
-    server = SocksServer()
-    asyncore.loop()
+    def wait(self):
+        asyncore.loop()
