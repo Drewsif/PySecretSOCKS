@@ -38,16 +38,33 @@ class Server():
         return t
 
     def _dataparse(self):
+        data = b''
+        needmore = False
         while True:
-            data = self.recvbuf.get()
+            if not data or needmore:
+                data += self.recvbuf.get()
+                needmore = False
+            else:
+                try:
+                    data += self.recvbuf.get_nowait()
+                except:
+                    pass
+            if len(data) < 2:
+                needmore = True
+                continue
             id, = struct.unpack('<H', data[:2])
             # ID 0 is to close a con
             if id == 0:
                 id, = struct.unpack('<H', data[2:4])
+                if DEBUG:
+                    print('Server requested to close', id)
                 if self._id_check(id):
                     self._close_id(id)
+                data = data[4:]
             # If we dont have that conn ID open
             elif not self._id_check(id):
+                if DEBUG:
+                    print('Server requested to open', id)
                 cmd, = struct.unpack('<B', data[2:3])
                 # Connect Request
                 if cmd == 1:
@@ -74,28 +91,51 @@ class Server():
                         t = threading.Thread(target=self._recv_loop, args=(id,))
                         t.daemon = True
                         t.start()
+                    data = data[i+1:]
             # Else we send the data
             else:
-                try:
-                    self._conns[id].sendall(data[2:])
-                except:
-                    self._close_id(id)
+                tosend = False
+                size, = struct.unpack('<H', data[2:4])
+                datasize = len(data[4:])
+                if DEBUG:
+                    print('Server c->s:', id, size, datasize)
+                if datasize == size:
+                    tosend = data[4:]
+                    data = b''
+                elif datasize > size:
+                    tosend = data[4:size+4]
+                    data = data[size+4:]
+                elif datasize < size:
+                    needmore = True
+
+                if tosend:
+                    try:
+                        self._conns[id].sendall(tosend)
+                        if DEBUG:
+                            print('Server s->out:', id, len(tosend))
+                    except:
+                        self._close_id(id)
 
     def _recv_loop(self, id):
         while self._conns[id] is not None:
             try:
-                data = self._conns[id].recv(2048)
+                data = self._conns[id].recv(65535)
+                size = len(data)
                 if data == b'':
                     raise socket.error
                 else:
-                    print(len(data))
-                    self.writebuf.put(struct.pack('<H', id) + data)
+                    if self._conns[id] is not None:
+                        self.writebuf.put(struct.pack('<HH', id, size) + data)
+                        if DEBUG:
+                            print('Server s->c:', id, len(data))
             except socket.timeout:
                 pass
             except socket.error:
                 self._close_id(id)
 
     def _close_id(self, id):
+        if DEBUG:
+            print('Server close id', id)
         if self._conns[id] is not None:
             self._conns[id].close()
             self._conns[id] = None

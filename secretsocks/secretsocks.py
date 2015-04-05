@@ -46,7 +46,7 @@ class Client():
     def new_conn(self, cmd, addr, port, s):
         id = self._conns[0].pop()
         if DEBUG:
-            print('New conn:', id)
+            print('Client new conn:', id, cmd, addr, port)
         s.settimeout(10)
         self._conns[id] = s
         if PY3:
@@ -62,17 +62,23 @@ class Client():
     def _recv_loop(self, id):
         while self._conns[id] is not None:
             try:
-                data = self._conns[id].recv(4092)
+                data = self._conns[id].recv(65535)
+                size = len(data)
                 if data == b'':
                     raise socket.error
                 else:
-                    self.writebuf.put(struct.pack('<H', id) + data)
+                    if self._conns[id] is not None:
+                        if DEBUG:
+                            print('Client c->s:', id, size)
+                        self.writebuf.put(struct.pack('<HH', id, size) + data)
             except socket.timeout:
                 pass
             except socket.error:
                 self._close_id(id)
 
     def _close_id(self, id):
+        if DEBUG:
+            print('Client closing id', id)
         if self._conns[id] is not None:
             self._conns[id].close()
             self._conns[id] = None
@@ -80,32 +86,63 @@ class Client():
         self.writebuf.put(resp)
         self._conns[0].appendleft(id)
 
-    def _dataparse(self):
+    def _dataparse(self, get=True):
+        data = b''
+        needmore = False
         while True:
-            data = self.recvbuf.get()
+            if not data or needmore:
+                data += self.recvbuf.get()
+                needmore = False
+            else:
+                try:
+                    data += self.recvbuf.get_nowait()
+                except:
+                    pass
             id, = struct.unpack('<H', data[:2])
             # ID 0 is to close a con
             if id == 0:
                 id, = struct.unpack('<H', data[2:4])
                 if self._id_check(id):
                     self._close_id(id)
+                data = data[4:]
             # If we dont have that conn ID, tell the server its closed
             elif not self._id_check(id):
                 resp = struct.pack('<HH', 0x00, id)
+                size, = struct.unpack('<H', data[2:4])
+                if DEBUG:
+                    print('Client invalid id request', id)
                 self.writebuf.put(resp)
+                # TODO: Need to add support for if size>msg
+                data = data[4+size:]
             # Else write the data
             else:
-                try:
-                    self._conns[id].sendall(data[2:])
-                except:
-                    self._close_id(id)
+                tosend = False
+                size, = struct.unpack('<H', data[2:4])
+                datasize = len(data[4:])
+                if DEBUG:
+                    print('Client s->c:', id, size, datasize)
+                if datasize == size:
+                    tosend = data[4:]
+                    data = b''
+                elif datasize > size:
+                    tosend = data[4:size+4]
+                    data = data[size+4:]
+                elif datasize < size:
+                    needmore = True
+
+                if tosend:
+                    try:
+                        if DEBUG:
+                            print('Client c->out:', id, len(tosend))
+                        self._conns[id].sendall(tosend)
+                    except:
+                        self._close_id(id)
 
     def _id_check(self, id):
         # TODO: Make this better
         try:
             return self._conns[id] is not None
         except:
-            print('Invalid ID:', id)
             return False
 
 
@@ -115,6 +152,7 @@ class SocksHandler():
 
     def new_request(self, sock, addr, client):
         # Client sends version and methods
+        sock.setblocking(True)
         ver, = struct.unpack('!B', sock.recv(1))
         if DEBUG:
             print('Version:', ver)
@@ -123,7 +161,8 @@ class SocksHandler():
         elif ver == 5:
             ret = self._socks5_init(sock, client)
         else:
-            print('ERROR: Invalid socks version')
+            if DEBUG:
+                print('ERROR: Invalid socks version')
             sock.close()
         if not ret:
             return None
@@ -146,7 +185,6 @@ class SocksHandler():
         # normal socks4
         else:
             dstaddr = "{}.{}.{}.{}".format(a, b, c, d)
-
 
         ret = client.new_conn(cd, dstaddr, dstport, sock)
         sock.sendall(struct.pack('!BBHI', 0x00, 0x5A, 0x0000, 0x00000000))
