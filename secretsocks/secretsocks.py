@@ -6,7 +6,7 @@ import threading
 import sys
 from collections import deque
 DEBUG = False
-PY3	= False
+PY3 = False
 if sys.version_info[0] == 3:
     import queue as Queue
     PY3 = True
@@ -108,55 +108,52 @@ class Client():
             print('Invalid ID:', id)
             return False
 
-# TODO: This does not need to be an asyncore class
-class SocksHandler():
-    def __init__(self, sock, addr, client):
-        self.conn = sock
-        self.conn.setblocking(True)
-        self.addr = addr
-        self.client = client
-        self.socks_init()
 
-    def socks_init(self):
+class SocksHandler():
+    def __init__(self):
+        pass
+
+    def new_request(self, sock, addr, client):
         # Client sends version and methods
-        self.ver, = struct.unpack('!B', self.conn.recv(1))
+        ver, = struct.unpack('!B', sock.recv(1))
         if DEBUG:
-            print('Version:', self.ver)
-        if self.ver == 4:
-            ret = self._socks4_init()
-        elif self.ver == 5:
-            ret = self._socks5_init()
+            print('Version:', ver)
+        if ver == 4:
+            ret = self._socks4_init(sock, client)
+        elif ver == 5:
+            ret = self._socks5_init(sock, client)
         else:
             print('ERROR: Invalid socks version')
-            self.conn.close()
+            sock.close()
         if not ret:
             return None
 
-    def _socks4_init(self):
-        cd, dstport, a, b, c ,d = struct.unpack('!BHBBBB', self.conn.recv(7))
+    def _socks4_init(self, sock, client):
+        cd, dstport, a, b, c ,d = struct.unpack('!BHBBBB', sock.recv(7))
         userid = ''
-        data = struct.unpack('!B', self.conn.recv(1))
+        data = struct.unpack('!B', sock.recv(1))
         while data[0] != 0:
             userid += chr(data[0])
-            data = struct.unpack('!B', self.conn.recv(1))
+            data = struct.unpack('!B', sock.recv(1))
 
         dstaddr = ''
         # sock4a
         if a + b + c == 0 and d > 0:
-            data = struct.unpack('!B', self.conn.recv(1))
+            data = struct.unpack('!B', sock.recv(1))
             while data[0] != 0:
                 dstaddr += chr(data[0])
-                data = struct.unpack('!B', self.conn.recv(1))
+                data = struct.unpack('!B', sock.recv(1))
         # normal socks4
         else:
             dstaddr = "{}.{}.{}.{}".format(a, b, c, d)
 
 
-        ret = self.client.new_conn(cd, dstaddr, dstport, self.conn)
-        self.conn.sendall(struct.pack('!BBHI', 0x00, 0x5A, 0x0000, 0x00000000))
-        return True
+        ret = client.new_conn(cd, dstaddr, dstport, sock)
+        sock.sendall(struct.pack('!BBHI', 0x00, 0x5A, 0x0000, 0x00000000))
+        return ret
 
-    def _socks5_init(self):
+    # TODO: Finish
+    def _socks5_init(self, sock, client):
         # Get list of auth methods
         methods, = struct.unpack('!B', self.recv(1))
         mlist = []
@@ -186,14 +183,21 @@ class SocksHandler():
             print(dstaddr)
         # , dstport = 0
 
-    def handle_read(self):
-        pass
+
+class OneToOneHandler():
+    def __init__(self, addr, port):
+        self.addr = addr
+        self.port = port
+
+    def new_request(self, sock, addr, client):
+        ret = client.new_conn(1, self.addr, self.port, sock)
+        return ret
 
 
-class SocksServer(asyncore.dispatcher):
+class Listener(asyncore.dispatcher):
     host = '127.0.0.1'
     port = 1080
-    handler = SocksHandler
+    handler = SocksHandler()
 
     def __init__(self, client, host=None, port=None, handler=None):
         asyncore.dispatcher.__init__(self)
@@ -213,7 +217,7 @@ class SocksServer(asyncore.dispatcher):
         pair = self.accept()
         if pair is not None:
             sock, addr = pair
-            handle = self.handler(sock, addr, self.client)
+            handle = self.handler.new_request(sock, addr, self.client)
 
     def wait(self):
         asyncore.loop()

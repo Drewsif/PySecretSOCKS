@@ -4,13 +4,14 @@ import secretsocks
 import socket
 import threading
 import sys
-PY3	= False
+PY3 = False
 if sys.version_info[0] == 3:
     import queue as Queue
     PY3 = True
 else:
     import Queue
     range = xrange
+
 
 class Client(secretsocks.Client):
     def __init__(self, ip, port):
@@ -85,5 +86,5 @@ if __name__ == '__main__':
     print('Creating a the client...')
     client = Client('127.0.0.1', 8080)
     print('Starting socks server...')
-    server = secretsocks.SocksServer(client, host='127.0.0.1', port=1080)
+    server = secretsocks.Listener(client, host='127.0.0.1', port=1080)
     server.wait()

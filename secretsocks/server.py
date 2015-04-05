@@ -112,3 +112,9 @@ class Server():
                 return False
             else:
                 return True
+
+# This allows this file to be executed by a remote python interpreter to initialise the class before the custom server
+# class is sent.
+if __name__ == '__main__':
+    class secretsocks(object):
+        Server = Server
