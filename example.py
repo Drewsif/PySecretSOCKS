@@ -78,7 +78,7 @@ def start_fake_remote():
     Server('127.0.0.1', 8080)
 
 if __name__ == '__main__':
-    secretsocks.DEBUG = True
+    secretsocks.set_debug(True)
     print('Starting the fake remote server...')
     t = threading.Thread(target=start_fake_remote)
     t.daemon = True
