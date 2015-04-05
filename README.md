@@ -2,7 +2,7 @@
 A python SOCKS server for tunneling connections over another channel
 
 ## Current State ##
-Only kinda broke!!
+Only a little broke!!
 
 ### Features ###
 - [x] Socks4a
@@ -13,4 +13,4 @@ Only kinda broke!!
 - [ ] Linux transparent proxy support
 
 ### Bugs ###
-- The example is not working as well as expected. It seems to work for 1-1 streams but when many are introduced it starts getting wonky
+- There is a slight delay in the client's connection being close from when the servers is closed.
