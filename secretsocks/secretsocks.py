@@ -14,6 +14,7 @@ else:
     import Queue
     range = xrange
 
+
 class Client():
     CONNECT = 1
     BIND = 2
@@ -98,6 +99,12 @@ class Client():
                     data += self.recvbuf.get_nowait()
                 except:
                     pass
+
+            # Make sure we at least have the header
+            if len(data) < 4:
+                needmore = True
+                continue
+
             id, = struct.unpack('<H', data[:2])
             # ID 0 is to close a con
             if id == 0:
