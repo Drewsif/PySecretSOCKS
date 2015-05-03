@@ -12,6 +12,7 @@ else:
     import Queue
     range = xrange
 
+
 class Server():
     def __init__(self):
         self.recvbuf = Queue.Queue()

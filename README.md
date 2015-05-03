@@ -1,5 +1,5 @@
 # PySecretSocks #
-A python SOCKS server for tunneling connections over another channel
+A python SOCKS server for tunneling connections over another channel. Making implementing covert channels a breeze!
 
 ## Terminology ##
 - **Listener** - The listener is the class that listens on a local port and sends incoming connections to the handler.

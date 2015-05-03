@@ -23,8 +23,9 @@ class Client():
     def __init__(self):
         self.recvbuf = Queue.Queue()
         self.writebuf = Queue.Queue()
-        self._conns = [deque(range(1,255))]
-        self._conns.extend([None]*254)
+        # Hard coding this is bad and I feel bad
+        self._conns = [deque(range(1, 2048))]
+        self._conns.extend([None]*2048)
 
     def recv(self):
         raise NotImplementedError
