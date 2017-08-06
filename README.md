@@ -53,7 +53,7 @@ Works! Just needs more polishing and a few features
 
 ### Features ###
 - [x] Socks4a
-- [ ] Socks5 - In progress
+- [x] Socks5 - No IPv6 support
 - [x] Remote Class Communication
  - 95% happy with it, just needs some bug fixes
 - [x] 1-1 mode

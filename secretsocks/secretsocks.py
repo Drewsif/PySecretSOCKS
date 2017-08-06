@@ -176,7 +176,7 @@ class SocksHandler():
             return None
 
     def _socks4_init(self, sock, client):
-        cd, dstport, a, b, c ,d = struct.unpack('!BHBBBB', sock.recv(7))
+        cmd, dstport, a, b, c ,d = struct.unpack('!BHBBBB', sock.recv(7))
         userid = ''
         data = struct.unpack('!B', sock.recv(1))
         while data[0] != 0:
@@ -194,40 +194,46 @@ class SocksHandler():
         else:
             dstaddr = "{}.{}.{}.{}".format(a, b, c, d)
 
-        ret = client.new_conn(cd, dstaddr, dstport, sock)
+        ret = client.new_conn(cmd, dstaddr, dstport, sock)
         sock.sendall(struct.pack('!BBHI', 0x00, 0x5A, 0x0000, 0x00000000))
         return ret
 
-    # TODO: Finish
     def _socks5_init(self, sock, client):
         # Get list of auth methods
-        methods, = struct.unpack('!B', self.recv(1))
+        methods, = struct.unpack('!B', sock.recv(1))
         mlist = []
         for i in range(0, methods):
-            test = self.recv(1)
-            if test == 0x00:
-                print('wat')
+            test = sock.recv(1)
             val, = struct.unpack('!B', test)
             mlist.append(val)
         # Always use no auth
         if 0 in mlist:
-            if DEBUG:
-                print('Using no auth', mlist)
-            self.send(struct.pack('!BB', self.ver, 0x00))
+            sock.send(struct.pack('!BB', 0x05, 0x00))
         else:
             print('No valid auth method', mlist)
-            self.send(struct.pack('!BB', self.ver, 0xFF))
-            self.close()
+            sock.send(struct.pack('!BB', 0x05, 0xFF))
+            sock.close()
 
         # Get the request
-        ver, cmd, rsv, atyp = struct.unpack('!BBBB', self.recv(4))
-        print(ver, cmd, rsv, atyp)
+        ver, cmd, rsv, atyp = struct.unpack('!BBBB', sock.recv(4))
         dstaddr = None
+        dstport = None
         if atyp == 1:
-            a, b, c, d = struct.unpack('!BBBB', self.recv(4))
+            a, b, c, d, dstport = struct.unpack('!BBBBH', sock.recv(6))
             dstaddr = "{}.{}.{}.{}".format(a, b, c, d)
-            print(dstaddr)
-        # , dstport = 0
+        elif atyp == 3:
+            size, = struct.unpack('!B', sock.recv(1))
+            dstaddr = sock.recv(size)
+            dstport, = struct.unpack('!H', sock.recv(2))
+        #TODO: ipv6 addr support
+        #elif atyp = 4:
+        else:
+            print('Unknown address type', atyp)
+            sock.send(struct.pack('!BB', 0x05, 0xFF))
+            sock.close()
+        ret = client.new_conn(cmd, dstaddr, dstport, sock)
+        sock.sendall(struct.pack('!BBBBHI', 0x05, 0x00, 0x00, 0x01, 0x00000000, 0x0000))
+        return ret
 
 
 class OneToOneHandler():
