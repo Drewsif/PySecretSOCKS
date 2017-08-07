@@ -161,7 +161,10 @@ class SocksHandler():
     def new_request(self, sock, addr, client):
         # Client sends version and methods
         sock.setblocking(True)
-        ver, = struct.unpack('!B', sock.recv(1))
+        data = sock.recv(1)
+        if not data:
+            return None
+        ver, = struct.unpack('!B', data)
         if DEBUG:
             print('Version:', ver)
         if ver == 4:
@@ -224,6 +227,8 @@ class SocksHandler():
         elif atyp == 3:
             size, = struct.unpack('!B', sock.recv(1))
             dstaddr = sock.recv(size)
+            if type(dstaddr) == bytes:
+                dstaddr = dstaddr.decode('utf8')
             dstport, = struct.unpack('!H', sock.recv(2))
         #TODO: ipv6 addr support
         #elif atyp = 4:

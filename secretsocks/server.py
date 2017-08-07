@@ -55,6 +55,7 @@ class Server():
                 continue
             id, = struct.unpack('<H', data[:2])
             # ID 0 is to close a con
+            # TODO: extend this to be a command channel for opening and closing cons
             if id == 0:
                 id, = struct.unpack('<H', data[2:4])
                 if DEBUG:
@@ -64,11 +65,11 @@ class Server():
                 data = data[4:]
             # If we dont have that conn ID open
             elif not self._id_check(id):
-                if DEBUG:
-                    print('Server requested to open', id)
                 cmd, = struct.unpack('<B', data[2:3])
                 # Connect Request
                 if cmd == 1:
+                    if DEBUG:
+                        print('Server requested to open', id)
                     port, = struct.unpack('<H', data[3:5])
                     addr = ""
                     i = 5
@@ -81,9 +82,12 @@ class Server():
                     # Open Socket
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     try:
+                        print(addr, port)
                         s.connect((addr, port))
                         s.settimeout(10)
-                    except:
+                    except Exception as e:
+                        if DEBUG:
+                            print(e)
                         s.close()
                         s = None
                         self._close_id(id)
@@ -93,6 +97,14 @@ class Server():
                         t.daemon = True
                         t.start()
                     data = data[i+1:]
+                # Invalid commands are most likely a size for a close connection
+                else:
+                    if DEBUG:
+                        print('Garbage data received', id)
+                    if len(data) >= cmd+4:
+                        data = data[cmd+4:]
+                    else:
+                        needmore = True
             # Else we send the data
             else:
                 tosend = False
